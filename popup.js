@@ -105,6 +105,18 @@ function renderDebug(debug, bytesInUse, courses, assignments) {
   if (Array.isArray(debug?.courseIds)) {
     lines.push(`Course IDs: ${debug.courseIds.join(", ")}`);
   }
+  
+  if (Array.isArray(debug?.results)) {
+    lines.push("");
+    lines.push("Per-course scrape results:");
+    for (const r of debug.results) {
+      const bits = [];
+      if (r.error) bits.push(`error=${r.error}`);
+      else bits.push(`itemsFound=${r.itemsFound}`, `dueFields=${r.parsedDueCount}`, `notAuthorized=${r.notAuthorized}`);
+      lines.push(`- ${r.id} (${r.name || "?"}): ${bits.join(" • ")}`);
+    }
+  }
+
   if (debug?.notes) lines.push(`Notes: ${debug.notes}`);
   $("debugText").textContent = lines.join("\n") || "(no debug data yet)";
 }

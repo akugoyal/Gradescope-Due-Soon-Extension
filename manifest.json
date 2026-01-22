@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Gradescope Due Soon",
-  "version": "0.3.0",
-  "description": "Unified, chronological list of Gradescope assignments due soon. Passive caching + Refresh All (with debug).",
+  "version": "0.4.0",
+  "description": "Unified, chronological list of Gradescope assignments due soon. Refresh All uses course dashboard (fixes unauthorized /assignments).",
   "permissions": [
     "storage",
     "tabs",
