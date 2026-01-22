@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Gradescope Due Soon</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <div class="title">Gradescope Due Soon</div>
+      <div class="sub">Unified deadlines across courses</div>
+    </header>
+
+    <section class="controls">
+      <button id="refreshAll" class="primary">Refresh all</button>
+      <button id="clear" class="secondary">Clear cache</button>
+    </section>
+
+    <section class="settings">
+      <label>
+        Show next
+        <input id="windowDays" type="number" min="1" max="365" step="1" />
+        days
+      </label>
+      <span id="status" class="status"></span>
+    </section>
+
+    <section>
+      <div class="sectionTitle">Due soon</div>
+      <div id="list" class="list"></div>
+    </section>
+
+    <div class="row">
+      <button id="toggleDebug" class="secondary smallbtn">Show debug</button>
+      <span id="mem" class="status"></span>
+    </div>
+
+    <section id="debug" class="debug" style="display:none;">
+      <div class="sectionTitle" style="padding:0 0 6px;">Debug</div>
+      <pre id="debugText"></pre>
+    </section>
+
+    <footer>
+      <div class="hint">
+        If nothing shows: open a course → Assignments once, then hit Refresh all.
+      </div>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
