@@ -1,4 +1,12 @@
-const $ = (id) => document.getElementById(id);
+
+// Helper so the popup doesn't crash if an element id changes.
+function $(...ids) {
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (el) return el;
+  }
+  return null;
+}
 
 function parseIso(iso) {
   if (!iso) return null;
@@ -11,7 +19,6 @@ function fmtDue(d) {
 }
 
 function badgeFor(due, now) {
-  if (!due) return { text: "no due date parsed", cls: "" };
   const ms = due - now;
   if (ms < 0) return { text: "overdue", cls: "overdue" };
   if (ms < 48 * 3600 * 1000) return { text: "soon", cls: "soon" };
@@ -24,7 +31,7 @@ async function send(msg) {
 
 async function loadData() {
   const resp = await send({ type: "GET_DATA" });
-  if (!resp?.ok) return { assignments: {}, courses: {}, settings: { windowDays: 14 }, debug: {}, bytesInUse: 0 };
+  if (!resp?.ok) return { assignments: {}, courses: {}, settings: { windowDays: 14, termFilter: "ALL", showOverdue: true }, debug: {}, bytesInUse: 0 };
   return resp;
 }
 
@@ -34,24 +41,30 @@ function escapeHtml(s) {
   }[c]));
 }
 
-function render(assignments, windowDays) {
+function bytesToKB(n){ return `${Math.round((n||0)/1024)} KB`; }
+
+function render(assignments, courses, windowDays, termFilter, showOverdue) {
   const list = $("list");
   list.innerHTML = "";
 
   const now = new Date();
   const cutoff = new Date(now.getTime() + windowDays * 24 * 3600 * 1000);
 
+  const courseTerm = (cid) => (courses && courses[cid] && courses[cid].term) ? courses[cid].term : null;
+
   const all = Object.values(assignments)
-    .map(a => ({ ...a, due: parseIso(a.dueAt) }))
+    .map(a => ({ ...a, due: parseIso(a.dueAt), term: courseTerm(a.courseId) }))
     .filter(a => a.due)
+    .filter(a => (termFilter === "ALL" ? true : (a.term === termFilter)))
+    .filter(a => (showOverdue ? true : a.due >= now))
     .sort((a, b) => a.due - b.due);
 
   if (all.length === 0) {
     const empty = document.createElement("div");
     empty.className = "item";
     empty.innerHTML = `
-      <div class="name">No due dates parsed yet</div>
-      <div class="course">Your course page shows due dates like “Jan 27 at 11:59PM”. If this stays empty, open Debug and send me the log.</div>
+      <div class="name">No due dates found for your filters</div>
+      <div class="course">Try switching term to “All terms”, or toggle “Show overdue”. If ECE20007 stays empty, click into that course once and hit Refresh all.</div>
     `;
     list.appendChild(empty);
     return;
@@ -77,7 +90,7 @@ function render(assignments, windowDays) {
     div.innerHTML = `
       <a class="link" href="${a.url}" target="_blank" rel="noreferrer">
         <div class="top">
-          <div class="course">${escapeHtml(a.courseName || a.courseId)}</div>
+          <div class="course">${escapeHtml(a.courseName || a.courseId)}${a.term ? " • " + escapeHtml(a.term) : ""}</div>
           <div class="due">${fmtDue(a.due)}</div>
         </div>
         <div class="name">${escapeHtml(a.assignmentName)}</div>
@@ -88,12 +101,6 @@ function render(assignments, windowDays) {
   }
 }
 
-async function setStatus(text) {
-  $("status").textContent = text || "";
-}
-
-function bytesToKB(n){ return `${Math.round((n||0)/1024)} KB`; }
-
 function renderDebug(debug, bytesInUse, courses, assignments) {
   $("mem").textContent = `Storage: ${bytesToKB(bytesInUse)} • Courses: ${Object.keys(courses||{}).length} • Items: ${Object.keys(assignments||{}).length}`;
   const lines = [];
@@ -102,10 +109,6 @@ function renderDebug(debug, bytesInUse, courses, assignments) {
     lines.push(`Opened (${debug.lastOpenedUrls.length}):`);
     for (const u of debug.lastOpenedUrls) lines.push(`- ${u}`);
   }
-  if (Array.isArray(debug?.courseIds)) {
-    lines.push(`Course IDs: ${debug.courseIds.join(", ")}`);
-  }
-  
   if (Array.isArray(debug?.results)) {
     lines.push("");
     lines.push("Per-course scrape results:");
@@ -113,63 +116,87 @@ function renderDebug(debug, bytesInUse, courses, assignments) {
       const bits = [];
       if (r.error) bits.push(`error=${r.error}`);
       else bits.push(`itemsFound=${r.itemsFound}`, `dueFields=${r.parsedDueCount}`, `notAuthorized=${r.notAuthorized}`);
-      lines.push(`- ${r.id} (${r.name || "?"}): ${bits.join(" • ")}`);
+      lines.push(`- ${r.id} (${r.name || "?"})${r.term ? " ["+r.term+"]" : ""}: ${bits.join(" • ")}`);
     }
   }
-
+  if (Array.isArray(debug?.discoveredTerms)) {
+    lines.push("");
+    lines.push(`Discovered terms: ${debug.discoveredTerms.join(", ")}`);
+  }
   if (debug?.notes) lines.push(`Notes: ${debug.notes}`);
   $("debugText").textContent = lines.join("\n") || "(no debug data yet)";
 }
 
-async function main() {
+function fillTermSelect(courses, selected) {
+  const sel = $("termSelect");
+  if (!sel) return;
+  const terms = Array.from(new Set(Object.values(courses || {}).map(c => c.term).filter(Boolean)));
+  sel.innerHTML = "";
+  const optAll = document.createElement("option");
+  optAll.value = "ALL";
+  optAll.textContent = "All terms";
+  sel.appendChild(optAll);
+  for (const t of terms) {
+    const opt = document.createElement("option");
+    opt.value = t;
+    opt.textContent = t;
+    sel.appendChild(opt);
+  }
+  sel.value = terms.includes(selected) ? selected : "ALL";
+}
+
+async function refreshUI() {
   const data = await loadData();
-  const settings = data.settings || { windowDays: 14 };
-  $("windowDays").value = settings.windowDays ?? 14;
+  const settings = data.settings || { windowDays: 14, termFilter: "ALL", showOverdue: true };
 
-  render(data.assignments || {}, settings.windowDays ?? 14);
+  const wd = $("windowDays");
+  if (wd) wd.value = settings.windowDays ?? 14;
+  fillTermSelect(data.courses || {}, settings.termFilter ?? "ALL");
+  const so = $("showOverdue");
+  if (so) so.checked = settings.showOverdue ?? true;
+
+  render(data.assignments || {}, data.courses || {}, settings.windowDays ?? 14, settings.termFilter ?? "ALL", settings.showOverdue ?? true);
   renderDebug(data.debug || {}, data.bytesInUse || 0, data.courses || {}, data.assignments || {});
+}
 
-  $("toggleDebug").addEventListener("click", async () => {
+async function main() {
+  await refreshUI();
+
+  $("toggleDebug")?.addEventListener("click", async () => {
     const dbg = $("debug");
     const show = dbg.style.display === "none";
     dbg.style.display = show ? "block" : "none";
     $("toggleDebug").textContent = show ? "Hide debug" : "Show debug";
   });
 
-  $("windowDays").addEventListener("change", async () => {
+  $("windowDays")?.addEventListener("change", async () => {
     const v = Math.max(1, Math.min(365, Number($("windowDays").value || 14)));
     $("windowDays").value = v;
     await send({ type: "SET_SETTINGS", settings: { windowDays: v } });
-    const fresh = await loadData();
-    render(fresh.assignments || {}, v);
-    renderDebug(fresh.debug || {}, fresh.bytesInUse || 0, fresh.courses || {}, fresh.assignments || {});
+    await refreshUI();
   });
 
-  $("refreshAll").addEventListener("click", async () => {
-    await setStatus("Refreshing…");
-    $("refreshAll").disabled = true;
-    try {
-      await send({ type: "REFRESH_ALL" });
-      const fresh = await loadData();
-      render(fresh.assignments || {}, (fresh.settings?.windowDays ?? 14));
-      renderDebug(fresh.debug || {}, fresh.bytesInUse || 0, fresh.courses || {}, fresh.assignments || {});
-      await setStatus("Updated");
-    } catch (e) {
-      await setStatus("Refresh failed");
-    } finally {
-      $("refreshAll").disabled = false;
-      setTimeout(() => setStatus(""), 2000);
-    }
+  $("termSelect")?.addEventListener("change", async () => {
+    const termFilter = $("termSelect").value || "ALL";
+    await send({ type: "SET_SETTINGS", settings: { termFilter } });
+    await refreshUI();
   });
 
-  $("clear").addEventListener("click", async () => {
+  $("showOverdue")?.addEventListener("change", async () => {
+    const showOverdue = $("showOverdue").checked;
+    await send({ type: "SET_SETTINGS", settings: { showOverdue } });
+    await refreshUI();
+  });
+
+  $("refreshAll")?.addEventListener("click", async () => {
+    await send({ type: "REFRESH_ALL" });
+    await refreshUI();
+  });
+
+  $("clearCache", "clear")?.addEventListener("click", async () => {
     await send({ type: "CLEAR_CACHE" });
-    const fresh = await loadData();
-    render(fresh.assignments || {}, (fresh.settings?.windowDays ?? 14));
-    renderDebug(fresh.debug || {}, fresh.bytesInUse || 0, fresh.courses || {}, fresh.assignments || {});
-    await setStatus("Cleared");
-    setTimeout(() => setStatus(""), 1500);
+    await refreshUI();
   });
 }
 
-main();
+document.addEventListener("DOMContentLoaded", main);

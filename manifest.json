@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Gradescope Due Soon",
-  "version": "0.4.0",
-  "description": "Unified, chronological list of Gradescope assignments due soon. Refresh All uses course dashboard (fixes unauthorized /assignments).",
+  "version": "0.6.1",
+  "description": "Gradescope Due Soon: term filter + overdue default ON + fix due date parsing (avoid Released).",
   "permissions": [
     "storage",
     "tabs",

@@ -124,3 +124,8 @@ footer { padding: 0 12px 12px; color: var(--muted); font-size: 11px; }
 }
 .row { display:flex; gap:8px; align-items:center; justify-content:space-between; padding: 0 12px 10px;}
 .smallbtn { padding: 6px 8px; border-radius: 10px; }
+
+.termRow{display:flex; gap:10px; align-items:center; padding:0 12px 10px;}
+.termRow select{flex:1; background:var(--card); border:1px solid var(--border); color:var(--text); border-radius:12px; padding:8px 10px;}
+.termRow label{display:flex; gap:8px; align-items:center; color:var(--muted); font-size:12px; user-select:none;}
+.termRow input[type="checkbox"]{width:14px;height:14px;}

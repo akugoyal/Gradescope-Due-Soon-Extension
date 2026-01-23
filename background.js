@@ -1,5 +1,5 @@
-// Gradescope Due Soon - background service worker (MV3, ES module) v4
-// Fix: Use /courses/<id> dashboard instead of /courses/<id>/assignments (often unauthorized for students)
+
+// Gradescope Due Soon - background service worker (MV3, ES module) v6.1
 
 const STORAGE_KEYS = {
   assignments: "gs_assignments",
@@ -8,7 +8,7 @@ const STORAGE_KEYS = {
   debug: "gs_debug"
 };
 
-const DEFAULT_SETTINGS = { windowDays: 14 };
+const DEFAULT_SETTINGS = { windowDays: 14, termFilter: "ALL", showOverdue: true };
 const RATE_LIMIT_MS = 900;
 const TAB_LOAD_TIMEOUT_MS = 20000;
 
@@ -18,11 +18,7 @@ async function getFromStorage(key, fallback) {
   const obj = await chrome.storage.local.get([key]);
   return obj[key] ?? fallback;
 }
-
-async function setInStorage(obj) {
-  await chrome.storage.local.set(obj);
-}
-
+async function setInStorage(obj) { await chrome.storage.local.set(obj); }
 function nowIso() { return new Date().toISOString(); }
 
 async function withTempTab(url, fn) {
@@ -41,14 +37,15 @@ async function withTempTab(url, fn) {
     chrome.tabs.onUpdated.addListener(listener);
   });
 
-  try {
-    return await fn(tabId);
-  } finally {
-    try { await chrome.tabs.remove(tabId); } catch {}
-  }
+  try { return await fn(tabId); }
+  finally { try { await chrome.tabs.remove(tabId); } catch {} }
 }
 
-// --- Course discovery from homepage cards ---
+function courseDashboardUrl(courseId) {
+  return `https://www.gradescope.com/courses/${courseId}`;
+}
+
+// --- Discovery: robust term detection by walking DOM around each course card ---
 async function discoverCoursesFromHomepage(openedUrls) {
   const dashboardUrl = "https://www.gradescope.com/";
   openedUrls.push(dashboardUrl);
@@ -59,7 +56,36 @@ async function discoverCoursesFromHomepage(openedUrls) {
       target: { tabId },
       world: "MAIN",
       func: () => {
-        // Prefer course cards: anchors that contain a course tile with assignments count footer.
+        function norm(s){ return (s||"").replace(/\s+/g," ").trim(); }
+        function findTermNear(el){
+          // Look at previous siblings / ancestors for a term label like "Spring 2026"
+          const termRe = /\b(Spring|Summer|Fall|Winter)\s+20\d{2}\b/i;
+          let cur = el;
+          for (let depth=0; depth<6 && cur; depth++) {
+            // scan previous siblings
+            let sib = cur.previousElementSibling;
+            let steps = 0;
+            while (sib && steps < 8) {
+              const t = norm(sib.textContent);
+              const m = t.match(termRe);
+              if (m) return m[0];
+              sib = sib.previousElementSibling;
+              steps++;
+            }
+            cur = cur.parentElement;
+          }
+          // fallback: scan page for term blocks and pick closest above
+          const terms = Array.from(document.querySelectorAll("body *"))
+            .map(e => ({ el:e, text:norm(e.textContent), top:e.getBoundingClientRect().top + window.scrollY }))
+            .filter(x => termRe.test(x.text) && x.el.childElementCount <= 2);
+          const y = el.getBoundingClientRect().top + window.scrollY;
+          let best = null;
+          for (const t of terms) {
+            if (t.top <= y + 5) best = t;
+          }
+          return best ? best.text.match(termRe)[0] : null;
+        }
+
         const candidates = Array.from(document.querySelectorAll('a[href^="/courses/"]'));
         const out = [];
         for (const a of candidates) {
@@ -68,17 +94,16 @@ async function discoverCoursesFromHomepage(openedUrls) {
           if (!m) continue;
           const id = m[1];
 
-          // Heuristic: course cards usually contain a strong title area and an assignments count footer.
-          const titleEl = a.querySelector("h3") || a.querySelector("h2") || a.querySelector("h1");
-          const name = (titleEl?.textContent || a.textContent || "").replace(/\s+/g," ").trim();
-
-          // Filter out weird sidebar links by requiring visible box size
           const rect = a.getBoundingClientRect();
           const looksLikeCard = rect.width > 200 && rect.height > 60;
-
           if (!looksLikeCard) continue;
 
-          out.push({ id, name: name.slice(0, 120) || `Course ${id}`, url: new URL(href, location.origin).toString() });
+          const titleEl = a.querySelector("h3,h2,h1,strong");
+          const name = norm(titleEl?.textContent || a.textContent);
+
+          const term = findTermNear(a);
+
+          out.push({ id, name: name.slice(0, 120) || `Course ${id}`, url: new URL(href, location.origin).toString(), term });
         }
         const dedup = {};
         for (const c of out) dedup[c.id] = c;
@@ -90,29 +115,24 @@ async function discoverCoursesFromHomepage(openedUrls) {
   return found;
 }
 
-function courseDashboardUrl(courseId) {
-  return `https://www.gradescope.com/courses/${courseId}`;
-}
-
-// --- Due parsing ---
-function parseDueDate({ dueIso, dueText }) {
+// --- Due parsing (prefer dueText; dueIso is optional and can be misleading if it came from Released) ---
+function parseDueDate({ dueText, dueIso }) {
+  if (dueText) {
+    let t = dueText.trim();
+    const hasYear = /\b20\d{2}\b/.test(t);
+    const year = new Date().getFullYear();
+    if (!hasYear) t = `${t} ${year}`;
+    t = t.replace(/\bat\b/i, " ");
+    const d = new Date(t);
+    if (!isNaN(d.getTime())) return d;
+  }
   if (dueIso) {
     const d = new Date(dueIso);
     if (!isNaN(d.getTime())) return d;
   }
-  if (!dueText) return null;
-
-  let t = dueText.trim();
-  const hasYear = /\b20\d{2}\b/.test(t);
-  const year = new Date().getFullYear();
-  if (!hasYear) t = `${t} ${year}`;
-  t = t.replace(/\bat\b/i, " ");
-  const d = new Date(t);
-  if (!isNaN(d.getTime())) return d;
   return null;
 }
 
-// --- Merge scraped into cache ---
 async function mergeScraped(scraped) {
   if (!scraped) return;
 
@@ -120,7 +140,6 @@ async function mergeScraped(scraped) {
   const courses = await getFromStorage(STORAGE_KEYS.courses, {});
 
   if (scraped.notAuthorized) {
-    // Still record the course as inaccessible if we know the id
     if (scraped.courseId) {
       courses[scraped.courseId] = courses[scraped.courseId] || { id: scraped.courseId, name: scraped.courseName || `Course ${scraped.courseId}`, url: courseDashboardUrl(scraped.courseId) };
       courses[scraped.courseId].access = "denied";
@@ -147,7 +166,7 @@ async function mergeScraped(scraped) {
     const aid = it.assignmentId || it.href;
     const key = `${cid}|${aid}`;
 
-    const dueDate = parseDueDate({ dueIso: it.dueIso, dueText: it.dueText });
+    const dueDate = parseDueDate({ dueText: it.dueText, dueIso: it.dueIso });
 
     assignments[key] = {
       key,
@@ -165,7 +184,6 @@ async function mergeScraped(scraped) {
   await setInStorage({ [STORAGE_KEYS.assignments]: assignments, [STORAGE_KEYS.courses]: courses });
 }
 
-// --- Refresh one course (open dashboard, scrape) ---
 async function refreshCourse(course, openedUrls, results) {
   const url = courseDashboardUrl(course.id);
   openedUrls.push(url);
@@ -173,54 +191,13 @@ async function refreshCourse(course, openedUrls, results) {
   let scraped = null;
   await withTempTab(url, async (tabId) => {
     scraped = await chrome.tabs.sendMessage(tabId, { type: "SCRAPE_ASSIGNMENTS" }).catch(() => null);
-
-    // Inline fallback if messaging fails
-    if (!scraped) {
-      scraped = await chrome.scripting.executeScript({
-        target: { tabId },
-        world: "MAIN",
-        func: () => {
-          function text(el){ return (el?.textContent || "").replace(/\s+/g," ").trim(); }
-          function lines(el){
-            const t=(el?.innerText || el?.textContent || "");
-            return t.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-          }
-          function pickDue(ls){
-            const re=/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b\s+\d{1,2}\s+(?:at\s+)?\d{1,2}:\d{2}\s*(AM|PM)\b/i;
-            for (const ln of ls){ if (re.test(ln)) return ln.replace(/\s+/g," ").trim(); }
-            return null;
-          }
-          const notAuthorized = /not authorized to access/i.test(document.body?.innerText || "");
-          const courseId = (location.pathname.match(/\/courses\/(\d+)/)||[])[1] || null;
-          const header = document.querySelector("h1, .courseHeader--title, .courseHeader");
-          const courseName = text(header) || null;
-
-          const items=[];
-          const rows=Array.from(document.querySelectorAll("table tbody tr"));
-          for (const r of rows){
-            const a=r.querySelector('a[href*="/assignments/"]') || r.querySelector("a");
-            if(!a) continue;
-            const href=a.getAttribute("href")||"";
-            const m=href.match(/\/assignments\/(\d+)/);
-            const assignmentId=m?m[1]:null;
-            const name=text(a)||"(untitled)";
-            const tds=Array.from(r.querySelectorAll("td"));
-            const dueCell=tds.length?tds[tds.length-1]:null;
-            const timeEl = dueCell?.querySelector?.("time[datetime]") || r.querySelector("time[datetime]");
-            const dueIso = timeEl ? timeEl.getAttribute("datetime") : null;
-            const dueText = dueCell ? pickDue(lines(dueCell)) : null;
-            items.push({ courseId, courseName, assignmentId, name, href: new URL(href, location.origin).toString(), dueIso, dueText });
-          }
-          return { courseId, courseName, items, notAuthorized };
-        }
-      }).then(r => r?.[0]?.result).catch(() => null);
-    }
+    if (!scraped) scraped = { courseId: course.id, courseName: course.name, items: [], notAuthorized: false };
   });
 
-  // Record per-course result for debug
   results.push({
     id: course.id,
     name: course.name,
+    term: course.term || null,
     url,
     notAuthorized: !!scraped?.notAuthorized,
     itemsFound: scraped?.items?.length ?? 0,
@@ -230,25 +207,31 @@ async function refreshCourse(course, openedUrls, results) {
   return scraped;
 }
 
-// --- Refresh all ---
 async function refreshAll() {
   const openedUrls = [];
   const results = [];
 
   const discovered = await discoverCoursesFromHomepage(openedUrls);
 
-  // Store discovered courses
   const coursesMap = {};
   for (const c of discovered) coursesMap[c.id] = { ...c, lastSeen: nowIso() };
   await setInStorage({ [STORAGE_KEYS.courses]: coursesMap });
 
-  // Refresh each discovered course
+  const termsInOrder = [];
+  for (const c of discovered) if (c.term && !termsInOrder.includes(c.term)) termsInOrder.push(c.term);
+
+  // If termFilter is ALL, default to newest term (top-of-page) if we found one.
+  const currentSettings = await getFromStorage(STORAGE_KEYS.settings, DEFAULT_SETTINGS);
+  if ((currentSettings.termFilter === "ALL" || !currentSettings.termFilter) && termsInOrder.length) {
+    await setInStorage({ [STORAGE_KEYS.settings]: { ...DEFAULT_SETTINGS, ...currentSettings, termFilter: termsInOrder[0], showOverdue: true } });
+  }
+
   for (const course of discovered) {
     try {
       const scraped = await refreshCourse(course, openedUrls, results);
       await mergeScraped(scraped);
     } catch (e) {
-      results.push({ id: course.id, name: course.name, url: courseDashboardUrl(course.id), error: String(e) });
+      results.push({ id: course.id, name: course.name, term: course.term || null, url: courseDashboardUrl(course.id), error: String(e) });
     }
     await sleep(RATE_LIMIT_MS);
   }
@@ -258,25 +241,17 @@ async function refreshAll() {
       lastRefreshAt: nowIso(),
       lastOpenedUrls: openedUrls,
       discoveredCourseIds: discovered.map(c => c.id),
+      discoveredTerms: termsInOrder,
       results,
-      notes: "If a course shows notAuthorized=true, Gradescope blocked that page. We now use /courses/<id> dashboards instead of /assignments."
+      notes: "Term is inferred from the homepage layout near each course card."
     }
   });
 }
 
-// --- Message handling ---
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
-    if (msg?.type === "REFRESH_ALL") {
-      await refreshAll();
-      sendResponse({ ok: true });
-      return;
-    }
-    if (msg?.type === "CLEAR_CACHE") {
-      await chrome.storage.local.remove([STORAGE_KEYS.assignments, STORAGE_KEYS.courses, STORAGE_KEYS.debug]);
-      sendResponse({ ok: true });
-      return;
-    }
+    if (msg?.type === "REFRESH_ALL") { await refreshAll(); sendResponse({ ok: true }); return; }
+    if (msg?.type === "CLEAR_CACHE") { await chrome.storage.local.remove([STORAGE_KEYS.assignments, STORAGE_KEYS.courses, STORAGE_KEYS.debug]); sendResponse({ ok: true }); return; }
     if (msg?.type === "GET_DATA") {
       const assignments = await getFromStorage(STORAGE_KEYS.assignments, {});
       const courses = await getFromStorage(STORAGE_KEYS.courses, {});
@@ -287,16 +262,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
     if (msg?.type === "SET_SETTINGS") {
-      const next = { ...DEFAULT_SETTINGS, ...(msg.settings || {}) };
+      const current = await getFromStorage(STORAGE_KEYS.settings, DEFAULT_SETTINGS);
+      const next = { ...DEFAULT_SETTINGS, ...current, ...(msg.settings || {}) };
       await setInStorage({ [STORAGE_KEYS.settings]: next });
       sendResponse({ ok: true, settings: next });
       return;
     }
-    if (msg?.type === "SCRAPED_ASSIGNMENTS") {
-      await mergeScraped(msg.scraped);
-      sendResponse({ ok: true });
-      return;
-    }
+    if (msg?.type === "SCRAPED_ASSIGNMENTS") { await mergeScraped(msg.scraped); sendResponse({ ok: true }); return; }
     sendResponse({ ok: false, error: "unknown_message" });
   })();
   return true;
