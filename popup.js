@@ -41,7 +41,7 @@ function escapeHtml(s) {
   }[c]));
 }
 
-function bytesToKB(n){ return `${Math.round((n||0)/1024)} KB`; }
+function bytesToKB(n) { return `${Math.round((n || 0) / 1024)} KB`; }
 
 function render(assignments, courses, windowDays, termFilter, showOverdue) {
   const list = $("list");
@@ -64,7 +64,7 @@ function render(assignments, courses, windowDays, termFilter, showOverdue) {
     empty.className = "item";
     empty.innerHTML = `
       <div class="name">No due dates found for your filters</div>
-      <div class="course">Try switching term to “All terms”, or toggle “Show overdue”. If ECE20007 stays empty, click into that course once and hit Refresh all.</div>
+      <div class="course">Try switching term to “All terms”, or toggle “Show overdue”. If it stays empty, click into a course once and hit Refresh all.</div>
     `;
     list.appendChild(empty);
     return;
@@ -102,7 +102,7 @@ function render(assignments, courses, windowDays, termFilter, showOverdue) {
 }
 
 function renderDebug(debug, bytesInUse, courses, assignments) {
-  $("mem").textContent = `Storage: ${bytesToKB(bytesInUse)} • Courses: ${Object.keys(courses||{}).length} • Items: ${Object.keys(assignments||{}).length}`;
+  $("mem").textContent = `Storage: ${bytesToKB(bytesInUse)} • Courses: ${Object.keys(courses || {}).length} • Items: ${Object.keys(assignments || {}).length}`;
   const lines = [];
   if (debug?.lastRefreshAt) lines.push(`Last refresh: ${debug.lastRefreshAt}`);
   if (Array.isArray(debug?.lastOpenedUrls)) {
@@ -116,7 +116,7 @@ function renderDebug(debug, bytesInUse, courses, assignments) {
       const bits = [];
       if (r.error) bits.push(`error=${r.error}`);
       else bits.push(`itemsFound=${r.itemsFound}`, `dueFields=${r.parsedDueCount}`, `notAuthorized=${r.notAuthorized}`);
-      lines.push(`- ${r.id} (${r.name || "?"})${r.term ? " ["+r.term+"]" : ""}: ${bits.join(" • ")}`);
+      lines.push(`- ${r.id} (${r.name || "?"})${r.term ? " [" + r.term + "]" : ""}: ${bits.join(" • ")}`);
     }
   }
   if (Array.isArray(debug?.discoveredTerms)) {
