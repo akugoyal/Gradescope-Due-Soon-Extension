@@ -129,3 +129,10 @@ footer { padding: 0 12px 12px; color: var(--muted); font-size: 11px; }
 .termRow select{flex:1; background:var(--card); border:1px solid var(--border); color:var(--text); border-radius:12px; padding:8px 10px;}
 .termRow label{display:flex; gap:8px; align-items:center; color:var(--muted); font-size:12px; user-select:none;}
 .termRow input[type="checkbox"]{width:14px;height:14px;}
+
+
+/* Filter checkboxes */
+.chkRow{display:flex; gap:12px; align-items:center; justify-content:flex-end;}
+.chk{display:flex; gap:6px; align-items:center; font-size:12px; opacity:0.95;}
+
+.badge.submitted{border-color: rgba(46, 204, 113, 0.55); color: rgba(46, 204, 113, 0.95);}

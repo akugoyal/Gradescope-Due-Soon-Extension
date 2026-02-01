@@ -18,7 +18,8 @@ function fmtDue(d) {
   return d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-function badgeFor(due, now) {
+function badgeFor(due, now, submitted) {
+  if (submitted) return { text: "submitted", cls: "submitted" };
   const ms = due - now;
   if (ms < 0) return { text: "overdue", cls: "overdue" };
   if (ms < 48 * 3600 * 1000) return { text: "soon", cls: "soon" };
@@ -31,7 +32,7 @@ async function send(msg) {
 
 async function loadData() {
   const resp = await send({ type: "GET_DATA" });
-  if (!resp?.ok) return { assignments: {}, courses: {}, settings: { windowDays: 14, termFilter: "ALL", showOverdue: true }, debug: {}, bytesInUse: 0 };
+  if (!resp?.ok) return { assignments: {}, courses: {}, settings: { windowDays: 14, termFilter: "ALL", showPast: false, showSubmitted: false }, debug: {}, bytesInUse: 0 };
   return resp;
 }
 
@@ -43,7 +44,7 @@ function escapeHtml(s) {
 
 function bytesToKB(n) { return `${Math.round((n || 0) / 1024)} KB`; }
 
-function render(assignments, courses, windowDays, termFilter, showOverdue) {
+function render(assignments, courses, windowDays, termFilter, showPast, showSubmitted) {
   const list = $("list");
   list.innerHTML = "";
 
@@ -53,10 +54,11 @@ function render(assignments, courses, windowDays, termFilter, showOverdue) {
   const courseTerm = (cid) => (courses && courses[cid] && courses[cid].term) ? courses[cid].term : null;
 
   const all = Object.values(assignments)
-    .map(a => ({ ...a, due: parseIso(a.dueAt), term: courseTerm(a.courseId) }))
+    .map(a => ({ ...a, due: parseIso(a.dueAt), term: courseTerm(a.courseId), submitted: !!a.submitted }))
     .filter(a => a.due)
     .filter(a => (termFilter === "ALL" ? true : (a.term === termFilter)))
-    .filter(a => (showOverdue ? true : a.due >= now))
+    .filter(a => (showSubmitted ? true : !a.submitted))
+    .filter(a => (showPast ? true : a.due >= now))
     .sort((a, b) => a.due - b.due);
 
   if (all.length === 0) {
@@ -64,7 +66,7 @@ function render(assignments, courses, windowDays, termFilter, showOverdue) {
     empty.className = "item";
     empty.innerHTML = `
       <div class="name">No due dates found for your filters</div>
-      <div class="course">Try switching term to “All terms”, or toggle “Show overdue”. If it stays empty, click into a course once and hit Refresh all.</div>
+      <div class="course">Try switching term to “All terms”, or toggle “Include past / submitted”. If it stays empty, click into a course once and hit Refresh all.</div>
     `;
     list.appendChild(empty);
     return;
@@ -84,7 +86,7 @@ function render(assignments, courses, windowDays, termFilter, showOverdue) {
   }
 
   for (const a of show) {
-    const b = badgeFor(a.due, now);
+    const b = badgeFor(a.due, now, a.submitted);
     const div = document.createElement("div");
     div.className = "item";
     div.innerHTML = `
@@ -147,15 +149,17 @@ function fillTermSelect(courses, selected) {
 
 async function refreshUI() {
   const data = await loadData();
-  const settings = data.settings || { windowDays: 14, termFilter: "ALL", showOverdue: true };
+  const settings = data.settings || { windowDays: 14, termFilter: "ALL", showPast: false, showSubmitted: false };
 
   const wd = $("windowDays");
   if (wd) wd.value = settings.windowDays ?? 14;
   fillTermSelect(data.courses || {}, settings.termFilter ?? "ALL");
-  const so = $("showOverdue");
-  if (so) so.checked = settings.showOverdue ?? true;
+  const sp = $("showPast");
+  if (sp) sp.checked = settings.showPast ?? false;
+  const ss = $("showSubmitted");
+  if (ss) ss.checked = settings.showSubmitted ?? false;
 
-  render(data.assignments || {}, data.courses || {}, settings.windowDays ?? 14, settings.termFilter ?? "ALL", settings.showOverdue ?? true);
+  render(data.assignments || {}, data.courses || {}, settings.windowDays ?? 14, settings.termFilter ?? "ALL", settings.showPast ?? false, settings.showSubmitted ?? false);
   renderDebug(data.debug || {}, data.bytesInUse || 0, data.courses || {}, data.assignments || {});
 }
 
@@ -182,9 +186,15 @@ async function main() {
     await refreshUI();
   });
 
-  $("showOverdue")?.addEventListener("change", async () => {
-    const showOverdue = $("showOverdue").checked;
-    await send({ type: "SET_SETTINGS", settings: { showOverdue } });
+  $("showPast")?.addEventListener("change", async () => {
+    const showPast = $("showPast").checked;
+    await send({ type: "SET_SETTINGS", settings: { showPast } });
+    await refreshUI();
+  });
+
+  $("showSubmitted")?.addEventListener("change", async () => {
+    const showSubmitted = $("showSubmitted").checked;
+    await send({ type: "SET_SETTINGS", settings: { showSubmitted } });
     await refreshUI();
   });
 

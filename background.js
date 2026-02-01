@@ -8,7 +8,13 @@ const STORAGE_KEYS = {
   debug: "gs_debug"
 };
 
-const DEFAULT_SETTINGS = { windowDays: 14, termFilter: "ALL", showOverdue: true };
+const DEFAULT_SETTINGS = {
+  windowDays: 14,
+  termFilter: "ALL",
+  // Default: only upcoming, unsubmitted
+  showPast: false,
+  showSubmitted: false,
+};
 const RATE_LIMIT_MS = 900;
 const TAB_LOAD_TIMEOUT_MS = 20000;
 
@@ -177,6 +183,9 @@ async function mergeScraped(scraped) {
       url: it.href,
       dueAt: dueDate ? dueDate.toISOString() : null,
       dueText: it.dueText || null,
+      // Persist submission state + raw status text for filtering/labels.
+      submitted: !!it.submitted,
+      statusText: it.statusText || null,
       lastUpdated: nowIso()
     };
   }

@@ -30,10 +30,16 @@
       <select id="termSelect" title="Filter by term">
         <option value="ALL">All terms</option>
       </select>
-      <label title="Include assignments already past due">
-        <input id="showOverdue" type="checkbox" />
-        Show overdue
-      </label>
+      <div class="chkRow">
+        <label class="chk" title="Include assignments with due dates in the past (only affects unsubmitted by default)">
+          <input id="showPast" type="checkbox" />
+          Include past
+        </label>
+        <label class="chk" title="Include assignments you already submitted">
+          <input id="showSubmitted" type="checkbox" />
+          Include submitted
+        </label>
+      </div>
     </section>
 
     <section>

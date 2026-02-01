@@ -68,6 +68,12 @@ function scrapeFromTable(courseId, courseName) {
     const href = `/courses/${courseId}/assignments/${assignmentId}`;
 
     const tds = Array.from(r.querySelectorAll("td"));
+
+    // Status column (Submitted / No Submission / etc.)
+    const statusCell = tds.length >= 1 ? tds[0] : null;
+    const statusText = text(statusCell?.querySelector?.(".submissionStatus--text") || statusCell);
+    const submitted = /submitted/i.test(statusText) && !/no submission/i.test(statusText);
+
     const dueCell = tds.length ? tds[tds.length - 1] : null;
 
     // IMPORTANT: Only look for <time> INSIDE dueCell; never fall back to row-wide <time>.
@@ -90,7 +96,8 @@ function scrapeFromTable(courseId, courseName) {
       assignmentId,
       name,
       href: new URL(href, location.origin).toString(),
-      dueIso, dueText
+      dueIso, dueText,
+      submitted, statusText
     });
   }
   return items;
@@ -124,7 +131,8 @@ function scrapeByLinkScan(courseId, courseName) {
       assignmentId,
       name: text(a) || "(untitled)",
       href: new URL(href, location.origin).toString(),
-      dueIso, dueText
+      dueIso, dueText,
+      submitted, statusText
     });
   }
   return items;
