@@ -69,10 +69,16 @@ function scrapeFromTable(courseId, courseName) {
 
     const tds = Array.from(r.querySelectorAll("td"));
 
-    // Status column (Submitted / No Submission / etc.)
+    // Status column (Submitted / No Submission / graded score like "20.0 / 20.0")
+    // Note: name is in a <th>, so the first <td> is typically Status.
     const statusCell = tds.length >= 1 ? tds[0] : null;
-    const statusText = text(statusCell?.querySelector?.(".submissionStatus--text") || statusCell);
-    const submitted = /submitted/i.test(statusText) && !/no submission/i.test(statusText);
+    const statusText = text(statusCell?.querySelector?.('.submissionStatus--text') || statusCell);
+    const isNoSubmission = /no\s+submission/i.test(statusText);
+    const isExplicitSubmitted = /submitted/i.test(statusText);
+    // Many courses show a grade in the Status column instead of the word "Submitted"
+    // e.g. "20.0 / 20.0", "100 / 100", etc. Treat any numeric score fraction as submitted.
+    const isGraded = /\b\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\b/.test(statusText);
+    const submitted = (isExplicitSubmitted || isGraded) && !isNoSubmission;
 
     const dueCell = tds.length ? tds[tds.length - 1] : null;
 
@@ -125,6 +131,18 @@ function scrapeByLinkScan(courseId, courseName) {
       || container?.querySelector?.("time.submissionTimeChart--dueDate[datetime]")
       || container?.querySelector?.("time[datetime]");
     const dueIso = normalizeDatetimeAttr(dueTime?.getAttribute("datetime"));
+
+    // Best-effort status detection when the table layout isn't available.
+    const rawStatus = text(container?.querySelector?.(".submissionStatus--text"));
+    const containerLines = container ? lines(container) : [];
+    const inferredLine = containerLines.find(l => /submitted/i.test(l))
+      || containerLines.find(l => /no submission/i.test(l))
+      || containerLines.find(l => /\b\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\b/.test(l));
+    const statusText = (rawStatus || inferredLine || "").trim();
+    const isNoSubmission = /no submission/i.test(statusText);
+    const isExplicitSubmitted = /submitted/i.test(statusText);
+    const isGraded = /\b\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?\b/.test(statusText);
+    const submitted = (isExplicitSubmitted || isGraded) && !isNoSubmission;
 
     items.push({
       courseId, courseName,

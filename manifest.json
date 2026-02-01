@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Gradescope Due Soon",
-  "version": "0.6.1",
-  "description": "Gradescope Due Soon: term filter + overdue default ON + fix due date parsing (avoid Released).",
+  "version": "0.6.2",
+  "description": "Gradescope Due Soon: term filter + submitted/graded detection + due date parsing.",
   "permissions": [
     "storage",
     "tabs",
